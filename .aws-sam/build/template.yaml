@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM Template NosqlSync
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Optional parameters
+      Parameters:
+      - ProjectName
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Name of the project
+    Default: RdsNosqlSync
+  TopicRegion:
+    Type: String
+    Default: us-east-2
+Resources:
+  SnsSyncTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${ProjectName}
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${ProjectName}
+  SyncTopicSubscription:
+    Type: AWS::SNS::Subscription
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      Endpoint:
+        Fn::GetAtt:
+        - SqsSyncQueue
+        - Arn
+      Protocol: sqs
+      TopicArn:
+        Ref: SnsSyncTopic
+      Region:
+        Ref: TopicRegion
+  SqsSyncQueue:
+    Type: AWS::SQS::Queue
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      QueueName:
+        Fn::Sub: ${ProjectName}
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${ProjectName}
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Id: QueuePolicyId
+        Statement:
+        - Sid: Allow-SNS-SendMessage
+          Effect: Allow
+          Principal:
+            Service: sns.amazonaws.com
+          Action: sqs:SendMessage
+          Resource:
+            Ref: SqsSyncQueue
+          Condition:
+            ArnEquals:
+              aws:SourceArn:
+                Ref: SnsSyncTopic
+      Queues:
+      - Ref: SqsSyncQueue

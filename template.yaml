@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: SNS-SQS
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: "Name of the project"
+    Default: "RdsNosqlSync"
+  TopicRegion:
+    Type: String
+    Default: us-east-2
+
+Resources:
+  SnsSyncTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}"
+
+  SyncTopicSubscription:
+    Type: AWS::SNS::Subscription
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      Endpoint: !GetAtt SqsSyncQueue.Arn
+      Protocol: sqs
+      TopicArn: !Ref SnsSyncTopic
+      Region: !Ref TopicRegion
+
+  SqsSyncQueue:
+    Type: AWS::SQS::Queue
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      QueueName: !Sub "${ProjectName}"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}"
+
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Id: QueuePolicyId
+        Statement:
+        - Sid: Allow-SNS-SendMessage
+          Effect: Allow
+          Principal: 
+            Service: sns.amazonaws.com
+          Action: sqs:SendMessage
+          Resource: !Ref SqsSyncQueue
+          Condition:
+            ArnEquals: 
+              aws:SourceArn: !Ref SnsSyncTopic
+      Queues:
+        - !Ref SqsSyncQueue
+
+  LambdaNosqlSyncRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaNosqlSyncRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  LambdaNosqlSyncPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: LambdaNosqlSyncPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          [
+            {
+              "Effect": "Allow",
+              "Action":
+                [
+                  "sqs:ReceiveMessage",
+                  "sqs:DeleteMessage",
+                  "sqs:GetQueueAttributes",
+                  "logs:CreateLogGroup",
+                  "logs:CreateLogStream",
+                  "logs:PutLogEvents",
+                  "ec2:CreateNetworkInterface",
+                  "ec2:DescribeNetworkInterfaces",
+                  "ec2:DeleteNetworkInterface",
+                  "ec2:AssignPrivateIpAddresses",
+                  "ec2:UnassignPrivateIpAddresses"
+                ],
+              "Resource": "*",
+            },
+            {
+              "Action":
+                [
+                  "s3:GetObject"
+                ],
+              "Effect": "Allow",
+              "Resource": arn:aws:s3:::ltm893-lambda
+            }
+          ]
+      Roles:
+        - !Ref LambdaNosqlSyncRole
+
+  NosqlSyncLamda:
+    Type: "AWS::Lambda::Function"
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      FunctionName: NosqlSyncLamda
+      Handler: lambda/index.handler
+      Role: !GetAtt LambdaNosqlSyncRole.Arn
+      Code:
+        S3Bucket: ltm893-lambdas
+        S3Key: lambda_function.zip
+      Runtime: python3.10.x
+      Timeout: 300
